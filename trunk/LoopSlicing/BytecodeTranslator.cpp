@@ -69,7 +69,11 @@ namespace {
 
 	string intToStr(unsigned int i)
 	{//Converts an integer to a string
+		if(i==0)
+				return("0");
+
 		string strInt="";
+
 		while(i>0)
 		{	int aux=i%10;
 			i=i/10;
@@ -80,7 +84,20 @@ namespace {
 		return(strInt);
 	}
 
+	bool shouldRemoveStruct(Function *F, StructType* sty)
+	{	bool ret = true;
+		for(Function::iterator inst = F->begin(); inst!=F->end(); inst++)
+		{	if (GetElementPtrInst* PI = dyn_cast<GetElementPtrInst>(inst))
+			{	StructType *styIt = dyn_cast<StructType>(PI->getPointerOperand()->getType()->getPointerElementType());
+				if(styIt == sty)
+				{	ret=false;
+					break;
+				}
+			}
 
+		}
+		return(ret);
+	}
 
 	string simpleInstType (Type *Ty)
 	{//Returns the type of a instruction
@@ -118,7 +135,8 @@ namespace {
     	map<string,string> registerTable;
     	srand(time(NULL));
     	string globalVariables="\n//Global Variables\n";
-    	string globalStructs="\n//Global Structures\n";
+    	vector<string> globalStructs;
+    	globalStructs.push_back("\n//Global Structures\n");
 
     	for(Module::global_iterator gv=M.global_begin(); gv!=M.global_end(); ++gv)
     	{	string auxgv;
@@ -305,27 +323,118 @@ namespace {
 							if (PI->getPointerOperand()->getType()->getPointerElementType()->isStructTy())
 							{
 								StructType *sty = dyn_cast<StructType>(PI->getPointerOperand()->getType()->getPointerElementType());
+								string pointerOp, opRet, position;
+								raw_string_ostream rsptr(pointerOp), rsret(opRet), rspos(position);
+								rsptr << PI->getPointerOperand()->getName();
+								rsret << PI->getName();
+								//If the first operand is 0, which is common, skip it.
+								gep_type_iterator gepi= gep_type_begin(PI);
+								if(cast<Constant>(gepi.getOperand())->isNullValue())
+									gepi++;
 
-								debugstr.clear();
-								rsdbg.flush();
-								sty->print(rsdbg);
-								rsdbg << "\n";
+								string op;
+								if(registerTable.find(rsptr.str())!=registerTable.end())
+									op =registerTable.find(rsptr.str())->second;
+								else
+									op=rsptr.str();
 
+								if(Constant* CPV = dyn_cast<Constant>(gepi.getOperand()))
+								{//If pos is a constant
+									CPV->print(rspos);
+									string auxi = rspos.str();
+									for(int j=0; auxi[j]!=' '; auxi.erase(0,1));
+									auxi.erase(0,1);
+									position.clear();
+									rspos.flush();
+									rspos<<auxi;
+								}
+								else
+								{	PI->print(rsdbg);
+									errs() << "I can't translate that!\n" + rsdbg.str();
+									return(false);
+								}
+								string instruction = op+".val"+rspos.str();
+								registerTable.insert(pair<string,string>(rsret.str(),instruction));
 
-								rsdbg<<"\t" + PI->getName() + "=" + sty->getName() + "\n";
+							//Print the struct delcaration
+								int currentElement=0;
+								string strDecl;
+								raw_string_ostream rsstructDeclaration(strDecl);
 
-								for(StructType::element_iterator ib = sty->element_begin(); ib!=sty->element_end(); ib++)
-								{	rsdbg<<"\t";
+								string aux = sty->getName();
+								while(aux[0]!='.') aux.erase(0,1);
+								aux.erase(0,1);
+
+								rsstructDeclaration << "struct " + aux + " {\n";
+								bool alreadyDef = false;
+
+								for(int i=0; i<globalStructs.size(); i++) //Check if the struct was already declared
+								{	string aux=rsstructDeclaration.str();
+									if (globalStructs[i].compare(0,aux.size(),aux)==0)
+									{	alreadyDef=true;
+										break;
+									}
+								}
+								if(alreadyDef) //If true, continue translating instructions
+									continue;
+
+								for(StructType::element_iterator ib = sty->element_begin(); ib!=sty->element_end(); ib++, currentElement++)
+								{	rsstructDeclaration<<"\t";
 									Type *ty = *ib;
-									ty->print(rsdbg);
+									//ty->print(rsdbg);
+
+									string pointers="";
+
+									if(ty->isPointerTy())
+									{	while(ty->isPointerTy())
+										{	pointers+='*';
+											ty=ty->getPointerElementType();
+										}
+									}
 
 									if(ty->isArrayTy())
-										rsdbg<<"array";
-									rsdbg<<"\n";
+									{
+										vector<int> arraySizes;
+
+										while(ty->isArrayTy())
+										{
+											arraySizes.push_back(ty->getArrayNumElements());
+											ty = ty->getArrayElementType();
+										}
+
+										string varDef = "\t" + simpleInstType(ty) + pointers + " ";
+
+										varDef+="val" + intToStr(currentElement);
+
+										for(unsigned int i=0; i<arraySizes.size(); i++)
+											varDef+="[" + intToStr(arraySizes[i]) + "]";
+										varDef+=";\n";
+										rsstructDeclaration << varDef;
+									}
+									else if(ty->isStructTy())
+									{
+										string structName = "val" + intToStr(currentElement);
+
+										StructType *sty = dyn_cast<StructType>(ty);
+										if(shouldRemoveStruct(F,sty))
+											continue;
+										string structTy=sty->getName();
+
+										while(structTy[0]!='.') structTy.erase(0,1);
+										structTy.erase(0,1);
+
+										string strDef;
+										raw_string_ostream rsst(strDef);
+
+										rsstructDeclaration << "\tstruct " + structTy + pointers +" " + structName + ";\n";
+									}
+									else
+									{	string varDef = "\t" + simpleInstType(ty) + pointers + " val" + intToStr(currentElement)+";\n";
+									rsstructDeclaration<<varDef;
+									}
 								}
-
-								errs() << rsdbg.str();
-
+								rsstructDeclaration << "};\n\n";
+								globalStructs.push_back(rsstructDeclaration.str());
 							}
 							else if(PI->getPointerOperand()->getType()->getPointerElementType()->isArrayTy())
 							{
@@ -400,6 +509,7 @@ namespace {
 									CPV->print(rso0);
 									string auxi = rso0.str();
 									for(int j=0; auxi[j]!=' '; auxi.erase(0,1));
+									auxi.erase(0,1);
 									str1.clear();
 									rso0<<auxi;
 								}
@@ -446,11 +556,9 @@ namespace {
 									name=registerTable.find(rsaux.str())->second;
 								}
 								else if(findValue(name,definedVars)==-1)
-									name="(" + registerTable.find(name)->second + ")";
-								for(int i=0; i<name.size(); i++)
-									if (name[i]=='.') name[i]='_';
-
-
+									name=registerTable.find(name)->second;
+								//for(int i=0; i<name.size(); i++)
+								//	if (name[i]=='.') name[i]='_';
 
 								//Get iftrue
 								rso_inst<<BI->getSuccessor(0)->getName();
@@ -510,6 +618,29 @@ namespace {
 								varDef+=";\n";
 								variableDeclarations.push_back(varDef);
 							}
+							else if (AI->getType()->getPointerElementType()->isStructTy() || AI->getType()->isStructTy())
+							{
+								string structName = AI->getName();
+
+								string structTy;
+								if(AI->getType()->isStructTy())
+								{	StructType *sty = dyn_cast<StructType>(AI->getType());
+									structTy=sty->getName();
+								}
+								else
+								{	StructType *sty = dyn_cast<StructType>(AI->getType()->getPointerElementType());
+									structTy=sty->getName();
+								}
+
+								while(structTy[0]!='.') structTy.erase(0,1);
+								structTy.erase(0,1);
+
+								string strDef;
+								raw_string_ostream rsst(strDef);
+
+								rsst<<"\tstruct " + structTy + " " + structName + ";\n";
+								variableDeclarations.push_back(rsst.str());
+							}
 							else
 							{
 								string varDef="\t";
@@ -546,6 +677,7 @@ namespace {
 								CPV->print(rso1);
 								string auxi = rso1.str();
 								for(int j=0; auxi[j]!=' '; auxi.erase(0,1));
+								auxi.erase(0,1);
 								str1.clear();
 								rso1<<auxi;
 							}
@@ -618,6 +750,7 @@ namespace {
 								CPV->print(rsop0);
 								string auxi = rsop0.str();
 								for(int j=0; auxi[j]!=' ' && j<auxi.size(); auxi.erase(0,1));
+								auxi.erase(0,1);
 								if(!auxi.empty())
 								{	op0.clear();
 									rsop0<<auxi;
@@ -626,6 +759,8 @@ namespace {
 							else
 							{	rsop0<<BO->getOperand(0)->getName();
 								op0=rsop0.str();
+								for(int i=0; i<op0.size(); i++)
+									if (op0[i]=='.') op0[i]='_';
 								if(op0.empty())
 								{//If the first operand is a register
 									string aux;
@@ -633,10 +768,8 @@ namespace {
 									BO->getOperand(0)->print(rsaux);
 									//Get register associated variable in our registerTable
 									op0=registerTable.find(rsaux.str())->second;
-
 								}
-								for(int i=0; i<op0.size(); i++)
-									if (op0[i]=='.') op0[i]='_';
+
 							}
 
 							if(Constant* CPV = dyn_cast<Constant>(BO->getOperand(1)))
@@ -644,6 +777,7 @@ namespace {
 								CPV->print(rsop1);
 								string auxi = rsop1.str();
 								for(int j=0; auxi[j]!=' ' && j<auxi.size(); auxi.erase(0,1));
+								auxi.erase(0,1);
 								if(!auxi.empty())
 								{	op1.clear();
 									rsop1<<auxi;
@@ -652,6 +786,8 @@ namespace {
 							else
 							{	rsop1<<BO->getOperand(1)->getName();
 								op1=rsop1.str();
+								for(int i=0; i<op1.size(); i++)
+									if (op1[i]=='.') op1[i]='_';
 								if(op1.empty())
 								{//If the second operand is a register
 									string aux;
@@ -660,8 +796,7 @@ namespace {
 									//Get the variable associanted with the register
 									op1=registerTable.find(rsaux.str())->second;
 								}
-								for(int i=0; i<op1.size(); i++)
-									if (op1[i]=='.') op1[i]='_';
+
 							}
 							//Prints a = b op c;
 							fileOutput+= "\t"+rso_inst.str() +" (" + rsop0.str()+ ")" +operation +"("+ rsop1.str()+");\n";
@@ -719,6 +854,7 @@ namespace {
 								CPV->print(rsop0);
 								string auxi = rsop0.str();
 								for(int j=0; auxi[j]!=' ' && j<auxi.size(); auxi.erase(0,1));
+								auxi.erase(0,1);
 								if(!auxi.empty())
 								{	op0.clear();
 									rsop0<<auxi;
@@ -740,8 +876,8 @@ namespace {
 								else if ( findValue(op0,definedVars)==-1)
 									op0="(" + registerTable.find(op0)->second + ")";
 
-								for(int i=0; i<op0.size(); i++)
-									if (op0[i]=='.') op0[i]='_';
+								//for(int i=0; i<op0.size(); i++)
+								//	if (op0[i]=='.') op0[i]='_';
 							}
 
 							if(Constant* CPV = dyn_cast<Constant>(CI->getOperand(1)))
@@ -749,6 +885,7 @@ namespace {
 								CPV->print(rsop1);
 								string auxi = rsop1.str();
 								for(int j=0; auxi[j]!=' ' && j<auxi.size(); auxi.erase(0,1));
+								auxi.erase(0,1);
 								if(!auxi.empty())
 								{	op1.clear();
 									rsop1<<auxi;
@@ -769,8 +906,8 @@ namespace {
 								}
 								else if ( findValue(op1,definedVars)==-1)
 									op1="(" + registerTable.find(op1)->second + ")";
-								for(int i=0; i<op1.size(); i++)
-									if (op1[i]=='.') op1[i]='_';
+								//for(int i=0; i<op1.size(); i++)
+								//	if (op1[i]=='.') op1[i]='_';
 							}
 							//Prints a = b op c;
 							string complement =  rsop0.str() + operation  + rsop1.str() ;
@@ -859,6 +996,7 @@ namespace {
 									CPV->print(rst1);
 									string auxi = rst1.str();
 									for(int j=0; auxi[j]!=' ' && j<auxi.size(); auxi.erase(0,1));
+									auxi.erase(0,1);
 									if(!auxi.empty())
 									{	st1.clear();
 										rst1<<auxi;
@@ -871,14 +1009,20 @@ namespace {
 										if (val[i]=='.') val[i]='_';
 									string aux=val;
 
-									if(findValue(val,definedVars)==-1)
+									if(val.empty())
+									{//Its a register
+										string reg;
+										raw_string_ostream rsreg(reg);
+										PN->getIncomingValueForBlock(block)->print(rsreg);
+										val=registerTable.find(rsreg.str())->second;
+									}
+									else if(findValue(val,definedVars)==-1)
 									{
 										if(registerTable.find(val)==registerTable.end())
 											val=aux;
 										else
-											val="("+registerTable.find(val)->second + ")";
+											val=registerTable.find(val)->second;
 									}
-
 									st1.clear();
 									rst1<<val;
 								}
@@ -939,6 +1083,7 @@ namespace {
 									CPV->print(rsop);
 									string auxi = rsop.str();
 									for(int j=0; auxi[j]!=' ' && j<auxi.size(); auxi.erase(0,1));
+									auxi.erase(0,1);
 									if(!auxi.empty())
 									{	opRet.clear();
 										rsop<<auxi;
@@ -996,9 +1141,14 @@ namespace {
 			outp<<header;
 			outp<<funDeclarations.str();
 			outp<<globalVariables;
-			outp<<globalStructs;
+			for(unsigned int i=0; i<globalStructs.size(); i++)
+				outp<<globalStructs[i];
 			outp<<funBody.str();
 			outp.close();
+
+			//for(map<string,string>::iterator it = registerTable.begin(); it!=registerTable.end(); ++it)
+			//	errs() << it->first + "\t" + it->second + "\n";
+
 
 			errs() << "\nFile printed with sucess\n";
 		}
