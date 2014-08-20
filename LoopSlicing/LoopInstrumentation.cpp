@@ -194,7 +194,7 @@ namespace {
             indices.push_back(zero);
             Constant *var_ref = ConstantExpr::getGetElementPtr(getFormat(module), indices);
             
-            GlobalVariable *varName = getConstString(module, param->getName().str());
+            GlobalVariable *varName = getConstString(module, param->getName(), param->getName().str());
             Constant *varName_ref = ConstantExpr::getGetElementPtr(varName, indices);
 
             CallInst *call = builder.CreateCall3(getPrintf(module), var_ref, varName_ref, param, "printf");
@@ -216,18 +216,19 @@ namespace {
         }
 
         GlobalVariable *getFormat(Module *module) {
-            return getConstString(module, StringRef("%s = %d\n"));
+            return getConstString(module, StringRef("format"), StringRef("%s = %d\n"));
         }
         
-        GlobalVariable *getConstString(Module *module, StringRef str) {
-            if (GlobalVariable *gv = module->getNamedGlobal(str))
+        GlobalVariable *getConstString(Module *module, StringRef name, StringRef str) {
+            Twine gvName = Twine(name) + Twine(".str");
+            if (GlobalVariable *gv = module->getNamedGlobal(gvName.str()))
                 return gv;
             
             LLVMContext& ctx = module->getContext();
             Constant *format_const = ConstantDataArray::getString(ctx, str.str());
             GlobalVariable *var = new GlobalVariable(
                                            *module, ArrayType::get(IntegerType::get(ctx, 8), str.size()+1),
-                                           true, GlobalValue::PrivateLinkage, format_const, ".str");
+                                           true, GlobalValue::PrivateLinkage, format_const, gvName);
             return var;
         }
         
