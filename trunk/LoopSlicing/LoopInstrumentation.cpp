@@ -185,7 +185,18 @@ CallInst *LoopInstrumentation::createPrintfCall(Module *module, Instruction *ins
     return call;
 }
 
-
+Function *LoopInstrumentation::getPrintf(Module *module) {
+    if (!this->printf) {
+        LLVMContext& ctx = module->getContext();
+        std::vector<Type*> argTypes;
+        argTypes.push_back(Type::getInt8PtrTy(ctx));
+        FunctionType *MTy = FunctionType::get(Type::getInt32Ty(ctx), argTypes, true);
+        
+        Constant *funcConst = module->getOrInsertFunction("printf", MTy);
+        this->printf = cast<Function>(funcConst);
+    }
+    return this->printf;
+}
 
 char LoopInstrumentation::ID = 0;
 static RegisterPass<LoopInstrumentation> X("instr-loop", "Instrument the loops of a function to print the loop exit predicates.");
