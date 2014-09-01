@@ -94,9 +94,10 @@ set<Value*> LoopInstrumentation::getLoopInputs(Loop *L, Graph *depGraph) {
             Value* value = NULL;
             if (OpNode* opNode = dyn_cast<OpNode>(pred->first)) {
                 value = opNode->getValue();
-            } else {
-                VarNode* varNode = dyn_cast<VarNode>(pred->first);
+            } else if (VarNode* varNode = dyn_cast<VarNode>(pred->first)) {
                 value = varNode->getValue();
+            } else {
+                continue;
             }
             
             if (dyn_cast<Constant>(value) || visitedNodes.count(pred->first) != 0)
