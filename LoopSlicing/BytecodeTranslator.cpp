@@ -67,6 +67,19 @@ namespace {
 		return (fileId); //Ex.: "_F74t0"
 	}
 
+	bool islibc(string s)
+	{	if(s=="malloc")
+			return(true);
+		if(s=="printf")
+			return(true);
+		if(s=="alloc")
+			return(true);
+		if(s=="atoi")
+			return(true);
+
+		return(false);
+	}
+
 	string intToStr(unsigned int i)
 	{//Converts an integer to a string
 		if(i==0)
@@ -82,6 +95,48 @@ namespace {
 		}
 
 		return(strInt);
+	}
+
+	string globalInitArrayVal(Module::global_iterator gv)
+	{	string ret;
+		raw_string_ostream rsret(ret);
+		gv->getInitializer()->print(rsret);
+
+		string aux = rsret.str();
+		aux.erase(0,1);
+		bool isString=false;
+
+		while(aux[0]!='[' && aux[0]!='"') //erase array size
+		{
+			aux.erase(0,1);
+			isString = aux[0]=='"';
+		}
+
+		unsigned int i=0;
+
+		while(aux[i]!=']' && aux[i]!='"')
+		{
+			while(aux[i]!=' ') //erase value type
+				aux.erase(i,1);
+			aux.erase(i,1); //erase blank space
+
+			while(aux[i]!=',' && aux[i]!=']')	//jump value
+			{	//errs() << aux+"\n";
+				if(aux[i]=='\\' && aux[i+1]=='0' && aux[i+2]=='0')
+					aux.erase(i,3);
+				i++;
+			}
+			if(aux[i]==']')
+			{	aux.erase(i,1); //erase ']'
+				break;
+			}
+			i++; //jump ','
+			aux.erase(i,1); //erase ' '
+		}
+		if(isString)
+		return(aux);
+			else
+		return("{" + aux + "}");
 	}
 
 	bool shouldRemoveStruct(Function *F, StructType* sty)
@@ -124,9 +179,13 @@ namespace {
 	}
 
 	string globalVarType (Type *Ty)
-		{//Returns the type of a instruction
-		return(simpleInstType(Ty->getPointerElementType()));
-		}
+	{//Returns the type of a instruction
+		Type *instTy = Ty->getPointerElementType();
+		while(instTy->isArrayTy())
+			instTy=instTy->getArrayElementType();
+
+		return(simpleInstType(instTy));
+	}
 
 
     virtual bool runOnModule(Module &M)
@@ -140,31 +199,58 @@ namespace {
 
     	for(Module::global_iterator gv=M.global_begin(); gv!=M.global_end(); ++gv)
     	{	string auxgv;
-    		raw_string_ostream rsgv(auxgv);
-    		rsgv<<gv->getName();
+			string gvinit;
+			raw_string_ostream rsinit(gvinit);
+    		auxgv=gv->getName();
+
+    		for(int i=0; i<auxgv.size(); ++i)
+    			if(auxgv[i]=='.') auxgv[i]='_';
+
     		string gvTy = globalVarType(gv->getType());
 
-    		globalVariables+=gvTy + " " + rsgv.str()+" = ";
+    		if(gv->getType()->getPointerElementType()->isArrayTy())
+    		{	Type * arrayTy = gv->getType()->getPointerElementType();
+				vector<int> arraySizes;
 
-    		auxgv.clear();
-    		rsgv.flush();
+				string aux;
+				raw_string_ostream rsaux(aux);
 
-    		string gvinit;
-    		raw_string_ostream rsinit(gvinit);
+				while(arrayTy->isArrayTy())
+				{
+					arraySizes.push_back(arrayTy->getArrayNumElements());
+					arrayTy = arrayTy->getArrayElementType();
+				}
 
-    		gv->getInitializer()->print(rsinit);
-    		gvinit = rsinit.str();
-    		while(gvinit[0]!=' ') gvinit.erase(0,1);
-    		gvinit.erase(0,1);
+				string val = globalInitArrayVal(gv);
 
-    		if(gvinit=="null") gvinit="NULL";
+				gvinit=simpleInstType(arrayTy);
 
-    		globalVariables+=gvinit+";\n";
+				gvinit += " " + auxgv;
 
+				for(unsigned int i=0; i<arraySizes.size(); i++)
+					gvinit+="[" + intToStr(arraySizes[i]) + "]";
+
+				globalVariables+= gvinit + " = " + val + ";\n";
+    		}
+    		else
+    		{
+				globalVariables+=gvTy + " " + auxgv+" = ";
+
+				gv->getInitializer()->print(rsinit);
+				gvinit = rsinit.str();
+				while(gvinit[0]!=' ') gvinit.erase(0,1);
+				gvinit.erase(0,1);
+
+				if(gvinit=="null") gvinit="NULL";
+
+				globalVariables+=gvinit+";\n";
+    		}
     	}
 
     	for (Module::iterator Foo=M.begin(), FooE=M.end(); Foo!=FooE; ++Foo)
 		{//Run on each function
+    		if(islibc(Foo->getName()))
+    			continue;
     		string s=Foo->getName();
 			string prefix="loopExtractionFun_";
 
@@ -1033,84 +1119,91 @@ namespace {
 						{	//CallInst* CaI;
 
 							Function* callFun = CaI->getCalledFunction();
-							for(Module::iterator cf=M.begin(); cf!=M.end(); ++cf)
-							{	if(cf->getName() == callFun->getName())
-								{	cf->getName();
-									bool notOnVector=true;
-									for(int j=0; j<shouldPrintFun.size();j++)
-									{	if(shouldPrintFun[j]->getName()==cf->getName())
-										{	notOnVector=false;
-											break;
+
+							if(islibc(callFun->getName()))
+							{	errs() << "islibc";
+
+							}
+							else
+							{
+								for(Module::iterator cf=M.begin(); cf!=M.end(); ++cf)
+								{	if(cf->getName() == callFun->getName())
+									{	bool notOnVector=true;
+										for(int j=0; j<shouldPrintFun.size();j++)
+										{	if(shouldPrintFun[j]->getName()==cf->getName())
+											{	notOnVector=false;
+												break;
+											}
+										}
+										if(notOnVector && !islibc(callFun->getName()))
+											shouldPrintFun.push_back(cf);
+										break;
+									}
+								}
+								//CallInst* CaI;
+
+								string funNm, callRet, opRet;
+								raw_string_ostream rsfnm(funNm);
+								raw_string_ostream rscall(callRet);
+								raw_string_ostream rsop(opRet);
+
+								rsfnm << callFun->getName();
+								rscall << CaI->getName();
+								callRet=rscall.str();
+								fileOutput+="\t";
+								string fTy = simpleInstType(callFun->getReturnType());
+								if (!callRet.empty())
+								{	fileOutput+= callRet + " = ";
+									string varDef = "\t";
+									varDef+=fTy + " ";
+									definedVars.push_back(callRet);
+									varDef+= callRet + ";\n";
+									variableDeclarations.push_back(varDef);
+								}
+								fileOutput+= rsfnm.str() +"(";
+
+								CallInst::op_iterator op=CaI->op_begin();
+								CallInst::op_iterator opend=CaI->op_end();
+
+								//The last operand is the called function intself, we only want the args
+								opend--;
+
+								for(; op!=opend; ++op)
+								{	opRet.clear();
+									if(Constant* CPV = dyn_cast<Constant>(op))
+									{//If the operand is a constant
+										CPV->print(rsop);
+										string auxi = rsop.str();
+										for(int j=0; auxi[j]!=' ' && j<auxi.size(); auxi.erase(0,1));
+										auxi.erase(0,1);
+										if(!auxi.empty())
+										{	opRet.clear();
+											rsop<<auxi;
 										}
 									}
-									if(notOnVector)
-										shouldPrintFun.push_back(cf);
-									break;
-								}
-							}
-							//CallInst* CaI;
+									else
+									{	rsop << op->get()->getName();
+										string auxi=rsop.str();
+										for(int i=0; i<auxi.size();i++)
+											if(auxi[i]=='.') auxi[i]='_';
+										opRet.clear();
 
-							string funNm, callRet, opRet;
-							raw_string_ostream rsfnm(funNm);
-							raw_string_ostream rscall(callRet);
-							raw_string_ostream rsop(opRet);
-
-							rsfnm << callFun->getName();
-							rscall << CaI->getName();
-							callRet=rscall.str();
-							fileOutput+="\t";
-							string fTy = simpleInstType(callFun->getReturnType());
-							if (!callRet.empty())
-							{	fileOutput+= callRet + " = ";
-								string varDef = "\t";
-								varDef+=fTy + " ";
-								definedVars.push_back(callRet);
-								varDef+= callRet + ";\n";
-								variableDeclarations.push_back(varDef);
-							}
-							fileOutput+= rsfnm.str() +"(";
-
-							CallInst::op_iterator op=CaI->op_begin();
-							CallInst::op_iterator opend=CaI->op_end();
-
-							//The last operand is the called function intself, we only want the args
-							opend--;
-
-							for(; op!=opend; ++op)
-							{	opRet.clear();
-								if(Constant* CPV = dyn_cast<Constant>(op))
-								{//If the operand is a constant
-									CPV->print(rsop);
-									string auxi = rsop.str();
-									for(int j=0; auxi[j]!=' ' && j<auxi.size(); auxi.erase(0,1));
-									auxi.erase(0,1);
-									if(!auxi.empty())
-									{	opRet.clear();
+										if(auxi.empty())
+										{//If the first operand is a register
+											string regaux;
+											raw_string_ostream rsaux(regaux);
+											op->get()->print(rsaux);
+											//Get register associated variable in our registerTable
+											auxi=registerTable.find(rsaux.str())->second;
+										}
 										rsop<<auxi;
 									}
+									if(op!=CaI->op_begin())
+											fileOutput+=",";
+									fileOutput+=rsop.str();
 								}
-								else
-								{	rsop << op->get()->getName();
-									string auxi=rsop.str();
-									for(int i=0; i<auxi.size();i++)
-										if(auxi[i]=='.') auxi[i]='_';
-									opRet.clear();
-
-									if(auxi.empty())
-									{//If the first operand is a register
-										string regaux;
-										raw_string_ostream rsaux(regaux);
-										op->get()->print(rsaux);
-										//Get register associated variable in our registerTable
-										auxi=registerTable.find(rsaux.str())->second;
-									}
-									rsop<<auxi;
-								}
-								if(op!=CaI->op_begin())
-										fileOutput+=",";
-								fileOutput+=rsop.str();
+								fileOutput+=");\n";
 							}
-							fileOutput+=");\n";
 						}
 						else
 						{	inst->print(rso_inst);
@@ -1152,6 +1245,7 @@ namespace {
 
 			errs() << "\nFile printed with sucess\n";
 		}
+    	errs() << "return";
 		return (false);
     }
   };

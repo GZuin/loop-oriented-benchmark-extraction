@@ -58,10 +58,16 @@
  /home/zuin/llvm-3.4/include/llvm/ADT/IntrusiveRefCntPtr.h \
  /home/zuin/llvm-3.4/include/llvm/ADT/SmallString.h \
  /home/zuin/llvm-3.4/include/llvm/Support/TimeValue.h \
- /home/zuin/llvm-3.4/include/llvm/Support/system_error.h DepGraph.h \
- /home/zuin/llvm-3.4/include/llvm/ADT/Statistic.h \
+ /home/zuin/llvm-3.4/include/llvm/Support/system_error.h \
+ /home/zuin/llvm-3.4/include/llvm/Transforms/Utils/ValueMapper.h \
+ /home/zuin/llvm-3.4/include/llvm/ADT/ValueMap.h \
  /home/zuin/llvm-3.4/include/llvm/ADT/DenseMap.h \
  /home/zuin/llvm-3.4/include/llvm/ADT/DenseMapInfo.h \
+ /home/zuin/llvm-3.4/include/llvm/Support/Mutex.h \
+ /home/zuin/llvm-3.4/include/llvm/Support/Threading.h \
+ /home/zuin/llvm-3.4/include/llvm/Support/ValueHandle.h \
+ /home/zuin/llvm-3.4/include/llvm/Transforms/Utils/Cloning.h DepGraph.h \
+ /home/zuin/llvm-3.4/include/llvm/ADT/Statistic.h \
  /home/zuin/llvm-3.4/include/llvm/Analysis/Dominators.h \
  /home/zuin/llvm-3.4/include/llvm/ADT/DepthFirstIterator.h \
  /home/zuin/llvm-3.4/include/llvm/ADT/GraphTraits.h \
@@ -81,7 +87,6 @@
  /home/zuin/llvm-3.4/include/llvm/Analysis/LoopInfo.h \
  /home/zuin/llvm-3.4/include/llvm/ADT/DenseSet.h AliasSets.h \
  /home/zuin/llvm-3.4/include/llvm/Analysis/AliasSetTracker.h \
- /home/zuin/llvm-3.4/include/llvm/Support/ValueHandle.h \
  /home/zuin/llvm-3.4/include/llvm/Analysis/AliasAnalysis.h \
  /home/zuin/llvm-3.4/include/llvm/Support/InstIterator.h PADriver.h \
  /home/zuin/llvm-3.4/include/llvm/Support/Debug.h PointerAnalysis.h \
@@ -205,13 +210,25 @@
 
 /home/zuin/llvm-3.4/include/llvm/Support/system_error.h:
 
-DepGraph.h:
+/home/zuin/llvm-3.4/include/llvm/Transforms/Utils/ValueMapper.h:
 
-/home/zuin/llvm-3.4/include/llvm/ADT/Statistic.h:
+/home/zuin/llvm-3.4/include/llvm/ADT/ValueMap.h:
 
 /home/zuin/llvm-3.4/include/llvm/ADT/DenseMap.h:
 
 /home/zuin/llvm-3.4/include/llvm/ADT/DenseMapInfo.h:
+
+/home/zuin/llvm-3.4/include/llvm/Support/Mutex.h:
+
+/home/zuin/llvm-3.4/include/llvm/Support/Threading.h:
+
+/home/zuin/llvm-3.4/include/llvm/Support/ValueHandle.h:
+
+/home/zuin/llvm-3.4/include/llvm/Transforms/Utils/Cloning.h:
+
+DepGraph.h:
+
+/home/zuin/llvm-3.4/include/llvm/ADT/Statistic.h:
 
 /home/zuin/llvm-3.4/include/llvm/Analysis/Dominators.h:
 
@@ -254,8 +271,6 @@ LoopInfoEx.h:
 AliasSets.h:
 
 /home/zuin/llvm-3.4/include/llvm/Analysis/AliasSetTracker.h:
-
-/home/zuin/llvm-3.4/include/llvm/Support/ValueHandle.h:
 
 /home/zuin/llvm-3.4/include/llvm/Analysis/AliasAnalysis.h:
 
