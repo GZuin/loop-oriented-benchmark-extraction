@@ -2,6 +2,8 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/raw_ostream.h"	/* raw_string_ostream */
+#include "llvm/Transforms/Utils/ValueMapper.h"	//VMap info
+#include "llvm/Transforms/Utils/Cloning.h"		//CloneFunctionInto info
 #include <math.h>      					/* % */
 #include <stdlib.h>     				/* srand, rand */
 #include <time.h>       				/* time */
@@ -34,8 +36,79 @@ namespace
 	    AU.setPreservesAll();
 	}
 
-	Instruction* findTerminator(Function &F)
-	{	for(Function::iterator block=F.begin(), blockend=F.end(); block!=blockend; ++block)
+	set<Value*> getLoopInputs(Loop *L, Graph *depGraph) {
+
+		std::set<Value*> loopExitPredicates = getLoopExitPredicates(L);
+
+	            std::set<GraphNode*> visitedNodes;
+	            std::set<GraphNode*> workList;
+
+	            for(std::set<Value*>::iterator v = loopExitPredicates.begin(); v != loopExitPredicates.end(); v++){
+	                if (GraphNode* valueNode = depGraph->findNode(*v))
+	                    workList.insert(valueNode);
+	                else
+	                    errs() << "Value not found in the graph : " << **v << "\n";
+	            }
+
+	            std::set<Value*> loopInputs;
+
+	            while (!workList.empty()) {
+	                GraphNode* n = *workList.begin();
+	                workList.erase(n);
+	                visitedNodes.insert(n);
+
+	                std::map<GraphNode*, edgeType> preds = n->getPredecessors();
+
+	                for (std::map<GraphNode*, edgeType>::iterator pred = preds.begin(), s_end =
+	                     preds.end(); pred != s_end; pred++) {
+
+	                    Value* value = NULL;
+	                    if (OpNode* opNode = dyn_cast<OpNode>(pred->first)) {
+	                        value = opNode->getValue();
+	                    } else {
+	                        VarNode* varNode = dyn_cast<VarNode>(pred->first);
+	                        value = varNode->getValue();
+	                    }
+
+	                    if (dyn_cast<Constant>(value) || visitedNodes.count(pred->first) != 0)
+	                        continue;
+
+	                    if (L->isLoopInvariant(value)) {
+	                        loopInputs.insert(value);
+	                    } else {
+	                        workList.insert(pred->first);
+	                    }
+	                }
+	            }
+
+	            return loopInputs;
+	        }
+
+	        //Get the list of values that control the loop exit
+	        std::set<Value*> getLoopExitPredicates(Loop* L) {
+	            std::set<Value*> loopExitPredicates;
+
+	            SmallVector<BasicBlock*, 4> loopExitingBlocks;
+	            L->getExitingBlocks(loopExitingBlocks);
+
+	            for (SmallVectorImpl<BasicBlock*>::iterator BB = loopExitingBlocks.begin(); BB != loopExitingBlocks.end(); BB++){
+	                if (BranchInst* BI = dyn_cast<BranchInst>((*BB)->getTerminator())) {
+	                    loopExitPredicates.insert(BI->getCondition());
+	                } else if (SwitchInst* SI = dyn_cast<SwitchInst>((*BB)->getTerminator())) {
+	                    loopExitPredicates.insert(SI->getCondition());
+	                } else if (IndirectBrInst* IBI = dyn_cast<IndirectBrInst>((*BB)->getTerminator())) {
+	                    loopExitPredicates.insert(IBI->getAddress());
+	                } else if (InvokeInst* II = dyn_cast<InvokeInst>((*BB)->getTerminator())) {
+	                    loopExitPredicates.insert(II);
+	                }
+	            }
+
+	            return loopExitPredicates;
+	        }
+
+
+	Instruction* findTerminator(Function *F)
+	{	for(Function::iterator block=F->begin(), blockend=F->end(); block!=blockend; ++block)
     	{	for(BasicBlock::iterator inst=block->begin(), instend=block->end(); inst!=instend; ++inst)
     		{	if(inst->isTerminator() && inst->getNumOperands()==1)
     				return(inst);
@@ -64,13 +137,13 @@ namespace
 			loopcounter=0;
 	}
 
-	void genDepGraph(Function &F)
+	void genDepGraph(Function *F)
 	{//This function is strongly based on the runOnFunction function in the LoopControlesDepGraph
 	 //pass, made by Raphael Ernani. For further reference search for DepGraph in the ccnuma page
 	 //https://code.google.com/p/selective-page-migration-ccnuma/
 
 	//Step 1: Get the complete dependence graph
-		functionDepGraph& DepGraph = getAnalysis<functionDepGraph> ();
+		functionDepGraph& DepGraph = getAnalysis<functionDepGraph>();
 		depGraph = DepGraph.depGraph;
 
 	//Step 2: Get the list of values that control the loop exit
@@ -114,7 +187,7 @@ namespace
 	    	if (GraphNode* valueNode = depGraph->findNode(*v))
 	    		depGraph->dfsVisitBack(valueNode, visitedNodes);
 	    	else
-	    		errs() << "Function : " << F.getName() << " - Value not found in the graph : " << **v << "\n";
+	    		errs() << "Function : " << F->getName() << " - Value not found in the graph : " << **v << "\n";
 	    }
 
 	//Step 4: Remove from the graph all the nodes that are not in the list of dependencies
@@ -129,7 +202,7 @@ namespace
 	    fullGraph = depGraph;
 	}
 
-	void setAnalyzedBranch(Function &F)
+	void setAnalyzedBranch(Function *F)
 	{
 		LoopInfoEx& li = getAnalysis<LoopInfoEx>();
 
@@ -197,13 +270,11 @@ namespace
 		}
 
 
-
-
-	virtual bool runOnFunction(Function &F)
+	bool loopSlice(Function *F)
 	{//Runs on each function removing instructions not related to the loop
 
-		errs() << "Iteration " << loopcounter << " " << F.getName() << "\n\n";
-		string s=F.getName();
+		errs() << "Iteration " << loopcounter << " " << F->getName() << "\n\n";
+		string s=F->getName();
 		string prefix="loopExtractionFun_";
 	//Only look at functions created for the loopExtraction
 		if(s.compare(0,prefix.size(),prefix)!=0)
@@ -223,7 +294,7 @@ namespace
 		setAnalyzedBranch(F);
 
 		vector<BasicBlock*> Fun;
-	    for(Function::iterator block=F.begin(), BBend=F.end(); block!=BBend; ++block)
+	    for(Function::iterator block=F->begin(), BBend=F->end(); block!=BBend; ++block)
 	    	Fun.push_back(block);
 
 	    for(int i=Fun.size()-1; i>=0; i--)
@@ -294,10 +365,7 @@ namespace
 
 	    					//Search for the analyzed loop
 	    					LoopInfoEx::iterator analyzedIt=li.begin(), instLoopIt=li.begin();
-	    					for (LoopInfoEx::iterator lit = li.begin(); loopcounter>=LoopInfoIt; analyzedIt++, LoopInfoIt++)
-	    					{ 	//errs() << loopcounter << " - " << LoopInfoIt << "\n";
-
-	    					}
+	    					for (LoopInfoEx::iterator lit = li.begin(); loopcounter>=LoopInfoIt; analyzedIt++, LoopInfoIt++);
 
 	    					Loop *AnalyzedLoop = *analyzedIt;
 	    					//errs() << "\t" << AnalyzedLoop->getHeader()->getName();
@@ -341,19 +409,175 @@ namespace
 	    			}
 	    		}
 	    		else
-	    		{
+	    		{	LoopInfoEx::iterator analyzedIt=li.begin(), instLoopIt=li.begin();
+	    			int LoopInfoIt=1;
+					for (LoopInfoEx::iterator lit = li.begin(); loopcounter>=LoopInfoIt; analyzedIt++, LoopInfoIt++);
 
+					Loop *AnalyzedLoop = *analyzedIt;
+
+	    			if(!AnalyzedLoop->contains(inst) && !inst->isTerminator())
+	    			{	errs() << "Removed: " << rso.str() << "\n";//The original instruction was removed.
+	    				inst->dropAllReferences();
+    					inst->removeFromParent();
+    					changed=true;
+	    			}
+	    			else
 	    				errs() << "Preserv: " << rso.str() << "\n";//The original instruction was preserved.
 	    		}
 
 	    	}
 	    	basicBlock.clear(); //Release the memory used by our vector of instructions
 	    }
-	    Fun.clear(); 	//Release the memory used by our vector of basicblocks
-	    //LoopInfoEx& li = getAnalysis<LoopInfoEx>();
+	    Fun.clear(); 	//Release the memory used by our vector of basicblock
 	    loopcounterEval(li); 	//Set loopcounter to evalute the next loop inside our original function
 	    return changed;	//If any change was made, return true.
-		}//End runOnFunction
+		}//End function
+
+
+	Function* removeReturnInst(Function* F) {
+
+	      // Collect them all first, as we can't remove them while iterating.
+	      // While iterating, we can add the new retvals (ret void).
+	      SmallPtrSet<ReturnInst*, 4> rets;
+	      for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
+
+	        if (!I->isTerminator())
+	          continue; // ignore non terminals
+
+	        if (ReturnInst* retInst = dyn_cast<ReturnInst>(&*I)) {
+
+	          // Create the return void instruction
+	          ReturnInst::Create(F->getContext(), 0, retInst);
+
+	          // Save return value instruction for removal
+	          rets.insert(retInst);
+	        }
+	      }
+
+	      // Now, remove all return values
+	      for (SmallPtrSet<ReturnInst*, 4>::iterator i = rets.begin(),
+	           ie = rets.end(); i != ie; ++i) {
+	        (*i)->eraseFromParent();
+	      }
+
+	      return F;
+	    }
+
+
+
+
+	virtual bool runOnFunction(Function &F)
+	{
+		string s=F.getName();
+		string prefix="loopExtractionFun_";
+		//Only look at functions created for the loopExtraction
+		if(!(s.compare(0,prefix.size(),prefix)==0))
+			return (false);
+
+		string trashPrefix = "loopExtractionTrash";
+		if(s.compare(0,trashPrefix.size(),prefix)==0)
+			return(false);
+
+		LoopInfoEx &LI = getAnalysis<LoopInfoEx>();
+		int timesToClone=0;
+		bool changed;
+
+		for (LoopInfoEx::iterator i = LI.begin(), e = LI.end(); i != e; i++, timesToClone++);
+
+
+
+			Function *OF=&F;
+
+			//Get the analyzed loop
+			LoopInfoEx::iterator analyzedIt=LI.begin(), instLoopIt=LI.begin();
+			int LoopInfoIt=0;
+			for (; loopcounter>LoopInfoIt; analyzedIt++, LoopInfoIt++);
+
+			Loop *AnalyzedLoop = *analyzedIt;
+			genDepGraph(OF);
+
+			set<Value*> loopinputs = getLoopInputs(AnalyzedLoop, depGraph);
+
+			for(set<Value*>::iterator it=loopinputs.begin(); it!=loopinputs.end(); it++)
+			{	Value *val = *it;
+				errs() << "val " + val->getName() + "\n";
+
+			}
+
+			FunctionType* useFT = OF->getFunctionType();
+
+			std::vector<Type*> params;
+
+			vector<string> newArgsNames;
+
+			for(Function::arg_iterator argit = OF->arg_begin(); argit!=OF->arg_end(); argit++)
+			{
+				newArgsNames.push_back(argit->getName());
+				params.push_back(argit->getType());
+			}
+
+			for (set<Value*>::iterator it = loopinputs.begin(); it!=loopinputs.end(); it++) {
+				Value *val = *it;
+
+				unsigned int i=0;
+				for(; i<newArgsNames.size(); i++)
+				{	if(newArgsNames[i]==val->getName())
+						break;
+				}
+				if(i==newArgsNames.size()) //Didnt find
+				{	params.push_back(val->getType());
+					newArgsNames.push_back(val->getName());
+				}
+			}
+
+			FunctionType *NewFnType = FunctionType::get(OF->getReturnType(), params, OF->isVarArg());
+			Function *NewF = Function::Create(NewFnType, OF->getLinkage());
+			NewF->copyAttributesFrom(OF);
+			OF->getParent()->getFunctionList().push_front(NewF);
+
+			Function::arg_iterator NFArg = NewF->arg_begin();
+			for (unsigned int i=0; i<newArgsNames.size(); i++, NFArg++) {
+
+			      NFArg->setName(newArgsNames[i]);
+			      errs() << "arg: " + NFArg->getName() + "\n";
+			    }
+
+			NewF->getBasicBlockList().splice(NewF->begin(), OF->getBasicBlockList());
+
+			// Replace all uses of the old arguments with the new arguments
+			for (llvm::Function::arg_iterator I = OF->arg_begin(), E = OF->arg_end(),
+			           NI = NewF->arg_begin(); I != E; ++I, ++NI)
+			      I->replaceAllUsesWith(NI);
+
+			string fname = OF->getName();
+			OF->setName("loopExtractionTrash");
+			NewF->setName(fname);
+
+			for(set<Value*>::iterator it=loopinputs.begin(); it!=loopinputs.end(); it++)
+			{	Value *val = *it;
+				string valName = val->getName();
+				errs() << "val " + val->getName() + "\n";
+				for (llvm::Function::arg_iterator I = NewF->arg_begin(), E = NewF->arg_end()
+						; I != E; ++I){
+					string argName = I->getName();
+
+					if(valName.compare(argName)==1)
+					{	if(valName[argName.size()]=='1')
+						{	errs() << "Replacing use of " + valName + " for " + argName + "\n";
+							val->replaceAllUsesWith(I);
+						}
+					}
+				}
+
+			}
+
+			changed = loopSlice(NewF);
+			errs() << "sliced";
+
+
+		return changed;
+	}
+
     };//End struct
 }//End namespace
 
