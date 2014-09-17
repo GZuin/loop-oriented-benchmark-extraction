@@ -13,7 +13,6 @@ LoopInstrumentation::LoopInstrumentation() : FunctionPass(ID) {
 void LoopInstrumentation::getAnalysisUsage(AnalysisUsage &AU) const{
     AU.addRequired<functionDepGraph> ();
     AU.addRequiredTransitive<LoopInfoEx> ();
-    AU.setPreservesAll(); //TODO check if its right
 }
 
 bool LoopInstrumentation::runOnFunction(Function &F) {
@@ -29,19 +28,26 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
     for (LoopInfoEx::iterator lit = li.begin(), lend = li.end(); lit != lend; lit++) {
         Loop* l = *lit;
         
-        //Get the last instruction of the loop header
         BasicBlock *loopHeader = l->getHeader();
         
-        std::vector<BasicBlock*> preHeaders;
-        for (pred_iterator PI = pred_begin(loopHeader); PI != pred_end(loopHeader); ++PI) {
-            BasicBlock *pred = *PI;
-            if (!l->contains(pred)) {
-                preHeaders.push_back(pred);
+        //Get or create a loop preheader
+        BasicBlock *preHeader;
+        
+        if (BasicBlock *block = l->getLoopPreheader()) {
+            preHeader = block;
+        } else {
+            std::vector<BasicBlock*> preHeaders;
+            for (pred_iterator PI = pred_begin(loopHeader); PI != pred_end(loopHeader); ++PI) {
+                BasicBlock *pred = *PI;
+                if (!l->contains(pred)) {
+                    preHeaders.push_back(pred);
+                }
             }
+            
+            preHeader = SplitBlockPredecessors(loopHeader, ArrayRef<BasicBlock*>(preHeaders), "preHeader");
         }
         
-        BasicBlock *newPreHeader = SplitBlockPredecessors(loopHeader, ArrayRef<BasicBlock*>(preHeaders), "preHeader");
-        Instruction *lastInst = newPreHeader->getTerminator();
+        Instruction *lastInst = preHeader->getTerminator();
         
         //Get the loop exit predicates
         std::set<Value*> loopInputs = getLoopInputs(l, depGraph);
@@ -59,7 +65,7 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
         l->getExitBlocks(exitBlocks);
         for (SmallVectorImpl<BasicBlock*>::iterator it = exitBlocks.begin(); it != exitBlocks.end(); it++) {
             BasicBlock *exBB = *it;
-            createPrintfCall(F.getParent(), &*(exBB->begin()), counter);
+            createPrintfCall(F.getParent(), exBB->getFirstInsertionPt(), counter);
         }
     }
     return false;
@@ -145,13 +151,14 @@ Value *LoopInstrumentation::createCounter(Loop *L, Twine varName, LLVMContext& c
     PHINode *counter = builder.CreatePHI(Type::getInt32Ty(ctx), nPreds, varName);
     
     //Get the loopHeader successor inside the loop
-    BasicBlock *succ = NULL;
+    /*BasicBlock *succ = NULL;
     if (L->contains(loopHeader->getTerminator()->getSuccessor(0))) {
         succ = loopHeader->getTerminator()->getSuccessor(0);
     } else {
         succ = loopHeader->getTerminator()->getSuccessor(1);
     }
-    builder.SetInsertPoint(&*(succ->begin()));
+    builder.SetInsertPoint(succ->getFirstInsertionPt());*/
+    builder.SetInsertPoint(loopHeader->getFirstInsertionPt());
     Value *inc = builder.CreateAdd(counter, ConstantInt::get(Type::getInt32Ty(ctx), 1));
     
     //Add PHINode incomings
