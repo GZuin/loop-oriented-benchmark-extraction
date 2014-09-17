@@ -299,7 +299,8 @@ namespace {
 
 				//For each of the function's arguments, add them to our vector
 				for(Function::arg_iterator ab=F->arg_begin(), ae=F->arg_end(); ab!=ae; ++ab)
-					arguments.push_back(ab->getName());
+				{	arguments.push_back(ab->getName());
+				}
 
 				if(fun==0)	//Default header
 				{	funBody <<	"\nint main(int argc, char *argv[])\n{\n";
@@ -323,14 +324,17 @@ namespace {
 					for(Function::arg_iterator ab=F->arg_begin(), ae=F->arg_end(); ab!=ae; ++ab)
 					{	string argTy = simpleInstType(ab->getType());
 						string argNm;
-						raw_string_ostream rsanm(argNm);
-						rsanm << ab->getName();
+						argNm = ab->getName();
+
+						for(unsigned int i=0; i<argNm.size(); i++)
+							if(argNm[i]=='.') argNm[i]='_';
+
 						if(ab!=F->arg_begin())
 						{	funBody<< ",";
 							funDeclarations<<",";
 						}
-						funBody<< argTy + " " + rsanm.str();
-						funDeclarations <<argTy + " " + rsanm.str();
+						funBody<< argTy + " " + argNm;
+						funDeclarations <<argTy + " " + argNm;
 					}
 					funBody<<")\n{\n";
 					funDeclarations<<");\n";
@@ -363,6 +367,8 @@ namespace {
 							for(Function::arg_iterator ab=F->arg_begin(), ae=F->arg_end(); ab!=ae; ++ab)
 							{	string argType = simpleInstType(ab->getType());
 								string argName = ab->getName();
+								for(unsigned int i=0; i<argName.size(); i++)
+									if(argName[i]=='.') argName[i]='_';
 								string aux="\t" + argType + " " + argName +  " = getArgvArgument(argv," + intToStr(ab->getArgNo() + 1) + "," + argName + ");\n";
 								variableDeclarations.push_back(aux);
 								definedVars.push_back(argName);
@@ -402,6 +408,7 @@ namespace {
 						raw_string_ostream rsdbg(debugstr);
 
 						inst->print(rsdbg);
+						//errs() << rsdbg.str() + "\n";
 						//cout << rsdbg.str() + "\n";
 
 						if (GetElementPtrInst* PI = dyn_cast<GetElementPtrInst>(inst))
@@ -948,22 +955,41 @@ namespace {
 							}
 							else
 							{	rsop0<<CI->getOperand(0)->getName();
-								op0=rsop0.str();
-								for(int i=0; i<op0.size(); i++)
-									if (op0[i]=='.') op0[i]='_';
-								if(op0.empty())
-								{//If the first operand is a register
-									string aux;
-									raw_string_ostream rsaux(aux);
-									CI->getOperand(0)->print(rsaux);
-									//Get the variable associanted with the register
-									op0=registerTable.find(rsaux.str())->second;
-								}
-								else if ( findValue(op0,definedVars)==-1)
-									op0="(" + registerTable.find(op0)->second + ")";
+								bool isArg=false;
+								for(Function::arg_iterator arg = F->arg_begin(); arg!=F->arg_end(); arg++)
+								{	string val=rsop0.str();
+									string argNm = arg->getName();
 
-								//for(int i=0; i<op0.size(); i++)
-								//	if (op0[i]=='.') op0[i]='_';
+									if(argNm.compare(val)==0)
+									{	isArg=true;
+										for(int i=0; i<val.size(); i++)
+											if (val[i]=='.') val[i]='_';
+										rsop0.flush();
+										op0.clear();
+
+										rsop0 << val;
+										break;
+									}
+								}
+
+								if(!isArg)
+								{	op0=rsop0.str();
+									for(int i=0; i<op0.size(); i++)
+										if (op0[i]=='.') op0[i]='_';
+									if(op0.empty())
+									{//If the first operand is a register
+										string aux;
+										raw_string_ostream rsaux(aux);
+										CI->getOperand(0)->print(rsaux);
+										//Get the variable associanted with the register
+										op0=registerTable.find(rsaux.str())->second;
+									}
+									else if ( findValue(op0,definedVars)==-1)
+										op0="(" + registerTable.find(op0)->second + ")";
+
+									//for(int i=0; i<op0.size(); i++)
+									//	if (op0[i]=='.') op0[i]='_';
+								}
 							}
 
 							if(Constant* CPV = dyn_cast<Constant>(CI->getOperand(1)))
@@ -979,22 +1005,42 @@ namespace {
 							}
 							else
 							{	rsop1<<CI->getOperand(1)->getName();
-								op1=rsop1.str();
-								for(int i=0; i<op1.size(); i++)
-									if (op1[i]=='.') op1[i]='_';
-								if(op1.empty())
-								{//If the second operand is a register
-									string aux;
-									raw_string_ostream rsaux(aux);
-									CI->getOperand(1)->print(rsaux);
-									//Get the variable associated to the register
-									op1=registerTable.find(rsaux.str())->second;
+								bool isArg=false;
+								for(Function::arg_iterator arg = F->arg_begin(); arg!=F->arg_end(); arg++)
+								{	string val=rsop1.str();
+									string argNm = arg->getName();
+
+									if(argNm.compare(val)==0)
+									{	isArg=true;
+										for(int i=0; i<val.size(); i++)
+											if (val[i]=='.') val[i]='_';
+										rsop1.flush();
+										op1.clear();
+
+										rsop1 << val;
+										break;
+									}
 								}
-								else if ( findValue(op1,definedVars)==-1)
-									op1="(" + registerTable.find(op1)->second + ")";
-								//for(int i=0; i<op1.size(); i++)
-								//	if (op1[i]=='.') op1[i]='_';
+
+								if(!isArg)
+								{	op1=rsop1.str();
+									for(int i=0; i<op1.size(); i++)
+										if (op1[i]=='.') op1[i]='_';
+									if(op1.empty())
+									{//If the second operand is a register
+										string aux;
+										raw_string_ostream rsaux(aux);
+										CI->getOperand(1)->print(rsaux);
+										//Get the variable associated to the register
+										op1=registerTable.find(rsaux.str())->second;
+									}
+									else if ( findValue(op1,definedVars)==-1)
+										op1="(" + registerTable.find(op1)->second + ")";
+									//for(int i=0; i<op1.size(); i++)
+									//	if (op1[i]=='.') op1[i]='_';
+								}
 							}
+
 							//Prints a = b op c;
 							string complement =  rsop0.str() + operation  + rsop1.str() ;
 							if(!isRegister)
