@@ -43,23 +43,42 @@ private:
     
     Value *createCounter(Loop *L, Twine varName, LLVMContext& ctx);
     
-    CallInst *createPrintfCall(Module *module, Instruction *insertPoint, Value *param);
+    CallInst *createPrintfCall(Module *module, Instruction *insertPoint, Value *param, Twine dbg);
     
     Function *getPrintf(Module *module);
     
-    static GlobalVariable *getFormat(Module *module) {
-        return getConstString(module, StringRef("format"), StringRef("%s = %d\n"));
+    unsigned getLineNumber(Instruction *I);
+    
+    static GlobalVariable *getFormat(Module *module, Type *Ty) {
+        if (!Ty)
+            return NULL;
+        
+        Twine format;
+        Twine formatTy;
+        
+        if (Ty->isFloatingPointTy()) {
+            format = Twine("%f");
+            formatTy = "Float";
+        } else if (Ty->isIntegerTy()) {
+            format = Twine("%d");
+            formatTy = "Int";
+        } else {
+            format = Twine("%s");
+            formatTy = "";
+        }
+        return getConstString(module, Twine("format")+formatTy,
+                              Twine("<LoopInstr> %s: %s = ") + format + Twine("\n"));
     }
     
-    static GlobalVariable *getConstString(Module *module, StringRef name, StringRef str) {
-        Twine gvName = Twine(name) + Twine(".str");
+    static GlobalVariable *getConstString(Module *module, Twine name, Twine str) {
+        Twine gvName = name + Twine(".str");
         if (GlobalVariable *gv = module->getNamedGlobal(gvName.str()))
             return gv;
         
         LLVMContext& ctx = module->getContext();
         Constant *format_const = ConstantDataArray::getString(ctx, str.str());
         GlobalVariable *var
-            = new GlobalVariable(*module, ArrayType::get(IntegerType::get(ctx, 8), str.size()+1),
+            = new GlobalVariable(*module, ArrayType::get(IntegerType::get(ctx, 8), str.str().size()+1),
                                  true, GlobalValue::PrivateLinkage, format_const, gvName);
         return var;
     }
