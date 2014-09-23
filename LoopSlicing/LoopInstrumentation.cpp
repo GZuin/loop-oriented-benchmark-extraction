@@ -25,6 +25,8 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
     
     LoopInfoEx& li = getAnalysis<LoopInfoEx>();
     
+    StringRef moduleID = F.getParent()->getModuleIdentifier();
+    
     int counter = 0;
     for (LoopInfoEx::iterator lit = li.begin(), lend = li.end(); lit != lend; lit++) {
         Loop* l = *lit;
@@ -32,7 +34,8 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
         BasicBlock *loopHeader = l->getHeader();
         
         unsigned loopLine = getLineNumber(loopHeader->getFirstInsertionPt());
-        Twine dbgInfo = F.getParent()->getModuleIdentifier() + Twine("_") + Twine(loopLine);
+        Twine dbgInfo = moduleID + Twine("_") + Twine(loopLine);
+        //std::string dbgInfoStr = dbgInfo.str();
         
         //Get or create a loop preheader
         BasicBlock *preHeader;
@@ -189,10 +192,10 @@ CallInst *LoopInstrumentation::createPrintfCall(Module *module, Instruction *ins
     indices.push_back(zero);
     Constant *var_ref = ConstantExpr::getGetElementPtr(getFormat(module, param->getType()), indices);
     
-    GlobalVariable *varName = getConstString(module, param->getName(), param->getName().str());
+    GlobalVariable *varName = getConstString(module, param->getName(), param->getName());
     Constant *varName_ref = ConstantExpr::getGetElementPtr(varName, indices);
     
-    GlobalVariable *dbgInfo = getConstString(module, dbg, dbg.str());
+    GlobalVariable *dbgInfo = getConstString(module, dbg, dbg);
     Constant *dbgInfo_ref = ConstantExpr::getGetElementPtr(dbgInfo, indices);
     
     CallInst *call = builder.CreateCall4(getPrintf(module), var_ref, dbgInfo_ref, varName_ref, param, "printf");
