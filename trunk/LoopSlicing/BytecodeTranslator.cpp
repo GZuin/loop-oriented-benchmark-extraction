@@ -97,6 +97,24 @@ namespace {
 		return(strInt);
 	}
 
+	bool compareArgs (Function::arg_iterator a, Function::arg_iterator b)
+	{	string aName = a->getName();
+		string bName = b->getName();
+		int i;
+		for(i=0; i<aName.size() && i<bName.size(); i++)
+		{	if (aName[i]==bName[i])
+				continue;
+			if (aName[i]<bName[i])
+				return (true);
+			else
+				return (false);
+		}
+
+		if(aName.size()==i)
+			return (true);
+		return (false);
+	}
+
 	string globalInitArrayVal(Module::global_iterator gv)
 	{	string ret;
 		raw_string_ostream rsret(ret);
@@ -364,15 +382,44 @@ namespace {
 					else
 					{
 						if(fun==0)
+						{
+							vector<Function::arg_iterator> usedArgs;
+
 							for(Function::arg_iterator ab=F->arg_begin(), ae=F->arg_end(); ab!=ae; ++ab)
-							{	string argType = simpleInstType(ab->getType());
+							{	string prefix="loopExtractionArg_";
 								string argName = ab->getName();
+								if(argName.compare(0,prefix.size(),prefix)==0)
+								{	argName.erase(0,prefix.size());
+									ab->setName(argName);
+									usedArgs.push_back(ab);
+								}
+							}
+
+							for(int i=usedArgs.size()-1; i>=1; i--)
+							{	for(int k=0; k<i; k++)
+								{	Function::arg_iterator a = usedArgs[k+1];
+									Function::arg_iterator b = usedArgs[k];
+									if(compareArgs(a, b))
+									{	Function::arg_iterator aux = usedArgs[i];
+										usedArgs[i]=usedArgs[k];
+										usedArgs[k]=aux;
+									}
+								}
+							}
+
+							for(int h=0;h<usedArgs.size();h++)
+							{	Function::arg_iterator ab = usedArgs[h];
+								string argName=ab->getName();
+								string argType = simpleInstType(ab->getType());
+
 								for(unsigned int i=0; i<argName.size(); i++)
 									if(argName[i]=='.') argName[i]='_';
-								string aux="\t" + argType + " " + argName +  " = getArgvArgument(argv," + intToStr(ab->getArgNo() + 1) + "," + argName + ");\n";
+								string aux="\t" + argType + " " + argName +  " = getArgvArgument(argv," + intToStr(h+1) + "," + argName + ");\n";
 								variableDeclarations.push_back(aux);
 								definedVars.push_back(argName);
 							}
+
+						}
 
 					}
 

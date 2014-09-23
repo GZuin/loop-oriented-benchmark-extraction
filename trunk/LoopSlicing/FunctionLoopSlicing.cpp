@@ -561,9 +561,15 @@ namespace
 						; I != E; ++I){
 					string argName = I->getName();
 
+					if(valName.compare(argName)==0)
+					{	I->setName("loopExtractionArg_" + argName);
+
+					}
+
 					if(valName.compare(argName)==1)
 					{	if(valName[argName.size()]=='1')
-						{	errs() << "Replacing use of " + valName + " for " + argName + "\n";
+						{	I->setName("loopExtracionArg_" + argName);
+							errs() << "Replacing use of " + valName + " for " + argName + "\n";
 							val->replaceAllUsesWith(I);
 						}
 					}
