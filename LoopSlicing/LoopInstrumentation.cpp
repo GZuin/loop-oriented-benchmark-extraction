@@ -35,7 +35,6 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
         
         unsigned loopLine = getLineNumber(loopHeader->getFirstInsertionPt());
         Twine dbgInfo = moduleID + Twine("_") + Twine(loopLine);
-        //std::string dbgInfoStr = dbgInfo.str();
         
         //Get or create a loop preheader
         BasicBlock *preHeader;
