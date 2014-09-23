@@ -5,6 +5,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/CFG.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/DebugInfo.h"
 
 LoopInstrumentation::LoopInstrumentation() : FunctionPass(ID) {
     this->printf = NULL;
@@ -30,6 +31,9 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
         
         BasicBlock *loopHeader = l->getHeader();
         
+        unsigned loopLine = getLineNumber(loopHeader->getFirstInsertionPt());
+        Twine dbgInfo = F.getParent()->getModuleIdentifier() + Twine("_") + Twine(loopLine);
+        
         //Get or create a loop preheader
         BasicBlock *preHeader;
         
@@ -54,7 +58,7 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
         
         //Insert printf calls
         for (std::set<Value*>::iterator it = loopInputs.begin(); it != loopInputs.end(); it++) {
-            createPrintfCall(F.getParent(), lastInst, *it);
+            createPrintfCall(F.getParent(), lastInst, *it, dbgInfo);
         }
         
         //Create trip counter
@@ -65,7 +69,7 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
         l->getExitBlocks(exitBlocks);
         for (SmallVectorImpl<BasicBlock*>::iterator it = exitBlocks.begin(); it != exitBlocks.end(); it++) {
             BasicBlock *exBB = *it;
-            createPrintfCall(F.getParent(), exBB->getFirstInsertionPt(), counter);
+            createPrintfCall(F.getParent(), exBB->getFirstInsertionPt(), counter, dbgInfo);
         }
     }
     return false;
@@ -157,7 +161,7 @@ Value *LoopInstrumentation::createCounter(Loop *L, Twine varName, LLVMContext& c
     } else {
         succ = loopHeader->getTerminator()->getSuccessor(1);
     }
-    builder.SetInsertPoint(succ->getFirstInsertionPt());*/
+    builder.SetInsertPoint(succ->getFirstInsertionPt());*/  
     builder.SetInsertPoint(loopHeader->getFirstInsertionPt());
     Value *inc = builder.CreateAdd(counter, ConstantInt::get(Type::getInt32Ty(ctx), 1));
     
@@ -173,22 +177,25 @@ Value *LoopInstrumentation::createCounter(Loop *L, Twine varName, LLVMContext& c
     return counter;
 }
 
-CallInst *LoopInstrumentation::createPrintfCall(Module *module, Instruction *insertPoint, Value *param) {
+CallInst *LoopInstrumentation::createPrintfCall(Module *module, Instruction *insertPt, Value *param, Twine dbg) {
     LLVMContext& ctx = module->getContext();
     IRBuilder<> builder(ctx);
-    builder.SetInsertPoint(insertPoint);
+    builder.SetInsertPoint(insertPt);
     
     Constant *zero = Constant::getNullValue(IntegerType::getInt32Ty(ctx));
     
     std::vector<llvm::Constant*> indices;
     indices.push_back(zero);
     indices.push_back(zero);
-    Constant *var_ref = ConstantExpr::getGetElementPtr(getFormat(module), indices);
+    Constant *var_ref = ConstantExpr::getGetElementPtr(getFormat(module, param->getType()), indices);
     
     GlobalVariable *varName = getConstString(module, param->getName(), param->getName().str());
     Constant *varName_ref = ConstantExpr::getGetElementPtr(varName, indices);
     
-    CallInst *call = builder.CreateCall3(getPrintf(module), var_ref, varName_ref, param, "printf");
+    GlobalVariable *dbgInfo = getConstString(module, dbg, dbg.str());
+    Constant *dbgInfo_ref = ConstantExpr::getGetElementPtr(dbgInfo, indices);
+    
+    CallInst *call = builder.CreateCall4(getPrintf(module), var_ref, dbgInfo_ref, varName_ref, param, "printf");
     
     return call;
 }
@@ -204,6 +211,15 @@ Function *LoopInstrumentation::getPrintf(Module *module) {
         this->printf = cast<Function>(funcConst);
     }
     return this->printf;
+}
+
+unsigned LoopInstrumentation::getLineNumber(Instruction *I) {
+    if (MDNode *N = I->getMetadata("dbg")) {
+        DILocation Loc(N);
+        unsigned Line = Loc.getLineNumber();
+        return Line;
+    }
+    return 0;
 }
 
 char LoopInstrumentation::ID = 0;
