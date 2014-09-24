@@ -33,8 +33,8 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
         
         BasicBlock *loopHeader = l->getHeader();
         
-        unsigned loopLine = getLineNumber(loopHeader->getFirstInsertionPt());
-        Twine dbgInfo = moduleID + Twine("_") + Twine(loopLine);
+        std::string dbgInfo = getLineNumber(loopHeader->getFirstInsertionPt());
+        //Twine dbgInfo = moduleID + Twine("_") + Twine(loopLine);
         
         //Get or create a loop preheader
         BasicBlock *preHeader;
@@ -60,7 +60,7 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
         
         //Insert printf calls
         for (std::set<Value*>::iterator it = loopInputs.begin(); it != loopInputs.end(); it++) {
-            createPrintfCall(F.getParent(), lastInst, *it, dbgInfo);
+            createPrintfCall(F.getParent(), lastInst, *it, Twine(dbgInfo));
         }
         
         //Create trip counter
@@ -71,7 +71,7 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
         l->getExitBlocks(exitBlocks);
         for (SmallVectorImpl<BasicBlock*>::iterator it = exitBlocks.begin(); it != exitBlocks.end(); it++) {
             BasicBlock *exBB = *it;
-            createPrintfCall(F.getParent(), exBB->getFirstInsertionPt(), counter, dbgInfo);
+            createPrintfCall(F.getParent(), exBB->getFirstInsertionPt(), counter, Twine(dbgInfo));
         }
     }
     return false;
@@ -215,13 +215,15 @@ Function *LoopInstrumentation::getPrintf(Module *module) {
     return this->printf;
 }
 
-unsigned LoopInstrumentation::getLineNumber(Instruction *I) {
+std::string LoopInstrumentation::getLineNumber(Instruction *I) {
     if (MDNode *N = I->getMetadata("dbg")) {
         DILocation Loc(N);
-        unsigned Line = Loc.getLineNumber();
-        return Line;
+        Twine Line = Twine(Loc.getLineNumber());
+        StringRef File = Loc.getFilename();
+        Twine result = File + Twine("_") + Line;
+        return result.str();
     }
-    return 0;
+    return "";
 }
 
 char LoopInstrumentation::ID = 0;
