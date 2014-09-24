@@ -41,7 +41,7 @@ private:
     
     Function *getPrintf(Module *module);
     
-    unsigned getLineNumber(Instruction *I);
+    std::string getLineNumber(Instruction *I);
     
     static GlobalVariable *getFormat(Module *module, Type *Ty) {
         if (!Ty)
