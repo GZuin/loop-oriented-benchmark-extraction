@@ -78,7 +78,7 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
 }
 
 //Fix point algoritm to get the variables defined outside the loop
-set<Value*> LoopInstrumentation::getLoopInputs(Loop *L, Graph *depGraph) {
+set<Value*> getLoopInputs(Loop *L, Graph *depGraph) {
     std::set<Value*> loopExitPredicates = getLoopExitPredicates(L);
     
     std::set<GraphNode*> visitedNodes;
@@ -127,7 +127,7 @@ set<Value*> LoopInstrumentation::getLoopInputs(Loop *L, Graph *depGraph) {
 }
 
 //Get the list of values that control the loop exit
-std::set<Value*> LoopInstrumentation::getLoopExitPredicates(Loop* L) {
+std::set<Value*> getLoopExitPredicates(Loop* L) {
     std::set<Value*> loopExitPredicates;
     
     SmallVector<BasicBlock*, 4> loopExitingBlocks;
