@@ -35,12 +35,6 @@ public:
 private:
     Function *printf;
     
-    //Fix point algoritm to get the variables defined outside the loop
-    set<Value*> getLoopInputs(Loop *L, Graph *depGraph);
-    
-    //Get the list of values that control the loop exit
-    std::set<Value*> getLoopExitPredicates(Loop* L);
-    
     Value *createCounter(Loop *L, Twine varName, LLVMContext& ctx);
     
     CallInst *createPrintfCall(Module *module, Instruction *insertPoint, Value *param, Twine dbg);
@@ -84,5 +78,11 @@ private:
     }
     
 };
+
+//Fix point algoritm to get the variables defined outside the loop
+set<Value*> getLoopInputs(Loop *L, Graph *depGraph);
+
+//Get the list of values that control the loop exit
+std::set<Value*> getLoopExitPredicates(Loop* L);
 
 #endif
