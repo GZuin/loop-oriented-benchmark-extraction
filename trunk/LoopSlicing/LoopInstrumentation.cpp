@@ -16,20 +16,24 @@ void LoopInstrumentation::getAnalysisUsage(AnalysisUsage &AU) const{
     AU.addRequiredTransitive<LoopInfoEx> ();
 }
 
-bool LoopInstrumentation::runOnFunction(Function &F) {
-    LLVMContext& ctx = F.getParent()->getContext();
-    
+bool LoopInstrumentation::runOnFunction(Function &F) {    
     //Get the complete dependence graph
     functionDepGraph& DepGraph = getAnalysis<functionDepGraph> ();
     Graph* depGraph = DepGraph.depGraph;
     
     LoopInfoEx& li = getAnalysis<LoopInfoEx>();
     
-    StringRef moduleID = F.getParent()->getModuleIdentifier();
-    
-    int counter = 0;
+    std::set<Loop*> outerLoops;
     for (LoopInfoEx::iterator lit = li.begin(), lend = li.end(); lit != lend; lit++) {
         Loop* l = *lit;
+        if (!l->getParentLoop()) {
+            outerLoops.insert(l);
+        }
+    }
+    
+    int counter = 0;
+    for (std::set<Loop*>::iterator it = outerLoops.begin(); it != outerLoops.end(); it++) {
+        Loop* l = *it;
         
         BasicBlock *loopHeader = l->getHeader();
         
@@ -65,7 +69,7 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
         
         //Create trip counter
         Twine varName = F.getName() + Twine(".loopCounter.") + Twine(counter++);
-        Value *counter = createCounter(l, varName, ctx);
+        Value *counter = createCounter(l, varName, F);
         
         SmallVector<BasicBlock*, 4> exitBlocks;
         l->getExitBlocks(exitBlocks);
@@ -149,32 +153,31 @@ std::set<Value*> getLoopExitPredicates(Loop* L) {
     return loopExitPredicates;
 }
 
-Value *LoopInstrumentation::createCounter(Loop *L, Twine varName, LLVMContext& ctx) {
+static void generateInc(IRBuilder<> builder, AllocaInst* ptr, LLVMContext &ctx) {
+    LoadInst* load = builder.CreateLoad(ptr);
+    Value *inc = builder.CreateAdd(load, ConstantInt::get(Type::getInt32Ty(ctx), 1));
+    builder.CreateStore(inc, ptr);
+}
+
+Value *LoopInstrumentation::createCounter(Loop *L, Twine varName, Function &F) {
+    IRBuilder<> builder(F.getEntryBlock().getFirstInsertionPt());
+    
+    LLVMContext& ctx = F.getParent()->getContext();
+    
+    AllocaInst* counter = builder.CreateAlloca(Type::getInt32Ty(ctx), NULL, varName);
+    
+    builder.SetInsertPoint(&(*F.getEntryBlock().rbegin()));
+    builder.CreateStore(ConstantInt::get(Type::getInt32Ty(ctx), 0), counter);
+    
     BasicBlock *loopHeader = L->getHeader();
-    IRBuilder<> builder(loopHeader->getFirstNonPHI());
-    
-    int nPreds = std::distance(pred_begin(loopHeader), pred_end(loopHeader));
-    PHINode *counter = builder.CreatePHI(Type::getInt32Ty(ctx), nPreds, varName);
-    
-    //Get the loopHeader successor inside the loop
-    /*BasicBlock *succ = NULL;
-    if (L->contains(loopHeader->getTerminator()->getSuccessor(0))) {
-        succ = loopHeader->getTerminator()->getSuccessor(0);
-    } else {
-        succ = loopHeader->getTerminator()->getSuccessor(1);
-    }
-    builder.SetInsertPoint(succ->getFirstInsertionPt());*/  
     builder.SetInsertPoint(loopHeader->getFirstInsertionPt());
-    Value *inc = builder.CreateAdd(counter, ConstantInt::get(Type::getInt32Ty(ctx), 1));
+    generateInc(builder, counter, ctx);
     
-    //Add PHINode incomings
-    for (pred_iterator PI = pred_begin(loopHeader); PI != pred_end(loopHeader); ++PI) {
-        BasicBlock *pred = *PI;
-        if (L->contains(pred)) {
-            counter->addIncoming(inc, pred);
-        } else {
-            counter->addIncoming(ConstantInt::get(Type::getInt32Ty(ctx), 0), pred);
-        }
+    //Add inc instruction for sub loops
+    for (Loop::iterator i = L->begin(); i != L->end(); i++) {
+        Loop* innerLoop = *i;
+        builder.SetInsertPoint(innerLoop->getHeader()->getFirstInsertionPt());
+        generateInc(builder, counter, ctx);
     }
     return counter;
 }

@@ -35,7 +35,7 @@ public:
 private:
     Function *printf;
     
-    Value *createCounter(Loop *L, Twine varName, LLVMContext& ctx);
+    Value *createCounter(Loop *L, Twine varName, Function &F);
     
     CallInst *createPrintfCall(Module *module, Instruction *insertPoint, Value *param, Twine dbg);
     
