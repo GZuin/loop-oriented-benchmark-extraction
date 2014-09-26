@@ -69,13 +69,15 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
         
         //Create trip counter
         Twine varName = F.getName() + Twine(".loopCounter.") + Twine(counter++);
-        Value *counter = createCounter(l, varName, F);
+        Value *counter = createCounter(l, varName+Twine(".addr"), F);
         
         SmallVector<BasicBlock*, 4> exitBlocks;
         l->getExitBlocks(exitBlocks);
         for (SmallVectorImpl<BasicBlock*>::iterator it = exitBlocks.begin(); it != exitBlocks.end(); it++) {
             BasicBlock *exBB = *it;
-            createPrintfCall(F.getParent(), exBB->getFirstInsertionPt(), counter, Twine(dbgInfo));
+            IRBuilder<> builder(exBB->getFirstInsertionPt());
+            LoadInst* load = builder.CreateLoad(counter, varName);
+            createPrintfCall(F.getParent(), exBB->getFirstInsertionPt(), load, Twine(dbgInfo));
         }
     }
     return false;
@@ -166,7 +168,7 @@ Value *LoopInstrumentation::createCounter(Loop *L, Twine varName, Function &F) {
     
     AllocaInst* counter = builder.CreateAlloca(Type::getInt32Ty(ctx), NULL, varName);
     
-    builder.SetInsertPoint(&(*F.getEntryBlock().rbegin()));
+    //builder.SetInsertPoint(&(*F.getEntryBlock().rbegin()));
     builder.CreateStore(ConstantInt::get(Type::getInt32Ty(ctx), 0), counter);
     
     BasicBlock *loopHeader = L->getHeader();
