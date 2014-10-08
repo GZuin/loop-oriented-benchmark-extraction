@@ -13,7 +13,7 @@ LoopInstrumentation::LoopInstrumentation() : FunctionPass(ID) {
 
 void LoopInstrumentation::getAnalysisUsage(AnalysisUsage &AU) const{
     AU.addRequired<functionDepGraph> ();
-    AU.addRequiredTransitive<LoopInfoEx> ();
+    AU.addRequiredTransitive<LoopInfo> ();
 }
 
 bool LoopInstrumentation::runOnFunction(Function &F) {    
@@ -21,19 +21,12 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
     functionDepGraph& DepGraph = getAnalysis<functionDepGraph> ();
     Graph* depGraph = DepGraph.depGraph;
     
-    LoopInfoEx& li = getAnalysis<LoopInfoEx>();
+    LoopInfo& li = getAnalysis<LoopInfo>();
     
-    std::set<Loop*> outerLoops;
-    for (LoopInfoEx::iterator lit = li.begin(), lend = li.end(); lit != lend; lit++) {
-        Loop* l = *lit;
-        if (!l->getParentLoop()) {
-            outerLoops.insert(l);
-        }
-    }
-    
+    bool changed = false;
     int counter = 0;
-    for (std::set<Loop*>::iterator it = outerLoops.begin(); it != outerLoops.end(); it++) {
-        Loop* l = *it;
+    for (LoopInfo::iterator lit = li.begin(), lend = li.end(); lit != lend; lit++) {
+        Loop* l = *lit;
         
         BasicBlock *loopHeader = l->getHeader();
         
@@ -78,9 +71,10 @@ bool LoopInstrumentation::runOnFunction(Function &F) {
             IRBuilder<> builder(exBB->getFirstInsertionPt());
             LoadInst* load = builder.CreateLoad(counter, varName);
             createPrintfCall(F.getParent(), exBB->getFirstInsertionPt(), load, Twine(dbgInfo));
+            changed = true;
         }
     }
-    return false;
+    return changed;
 }
 
 //Fix point algoritm to get the variables defined outside the loop
@@ -155,13 +149,17 @@ std::set<Value*> getLoopExitPredicates(Loop* L) {
     return loopExitPredicates;
 }
 
-static void generateInc(IRBuilder<> builder, AllocaInst* ptr, LLVMContext &ctx) {
+static void generateAdd(IRBuilder<> builder, AllocaInst* ptr, LLVMContext &ctx, int value) {
     LoadInst* load = builder.CreateLoad(ptr);
-    Value *inc = builder.CreateAdd(load, ConstantInt::get(Type::getInt32Ty(ctx), 1));
+    Value *inc = builder.CreateAdd(load, ConstantInt::get(Type::getInt32Ty(ctx), value));
     builder.CreateStore(inc, ptr);
 }
 
-Value *LoopInstrumentation::createCounter(Loop *L, Twine varName, Function &F) {
+static void generateInc(IRBuilder<> builder, AllocaInst* ptr, LLVMContext &ctx) {
+    generateAdd(builder, ptr, ctx, 1);
+}
+
+/*Value *LoopInstrumentation::createCounter(Loop *L, Twine varName, Function &F) {
     IRBuilder<> builder(F.getEntryBlock().getFirstInsertionPt());
     
     LLVMContext& ctx = F.getParent()->getContext();
@@ -180,6 +178,31 @@ Value *LoopInstrumentation::createCounter(Loop *L, Twine varName, Function &F) {
         Loop* innerLoop = *i;
         builder.SetInsertPoint(innerLoop->getHeader()->getFirstInsertionPt());
         generateInc(builder, counter, ctx);
+    }
+    return counter;
+}*/
+
+Value *LoopInstrumentation::createCounter(Loop *L, Twine varName, Function &F) {
+    IRBuilder<> builder(F.getEntryBlock().getFirstInsertionPt());
+    
+    LLVMContext& ctx = F.getParent()->getContext();
+    
+    AllocaInst* counter = builder.CreateAlloca(Type::getInt32Ty(ctx), NULL, varName);
+    
+    //builder.SetInsertPoint(&(*F.getEntryBlock().rbegin()));
+    builder.CreateStore(ConstantInt::get(Type::getInt32Ty(ctx), 0), counter);
+    
+    BasicBlock *loopHeader = L->getHeader();
+    builder.SetInsertPoint(loopHeader->getFirstInsertionPt());
+    generateInc(builder, counter, ctx);
+    
+    //Add inc instruction for sub loops
+    std::vector<BasicBlock*> blocks = L->getBlocks();
+    for (std::vector<BasicBlock*>::iterator i = blocks.begin(); i != blocks.end(); i++) {
+        BasicBlock* BB = *i;
+        int nInst = BB->getInstList().size();
+        builder.SetInsertPoint(BB->getFirstInsertionPt());
+        generateAdd(builder, counter, ctx, nInst);
     }
     return counter;
 }
